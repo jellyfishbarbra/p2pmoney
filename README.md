@@ -1,4 +1,4 @@
-# p2pmoney
+# verzo 
 
 A minimalist and experimental decentralized ledger with an identity-based accounting.
 
