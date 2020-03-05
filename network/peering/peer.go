@@ -1,6 +1,9 @@
 package peering
 
 import (
+	"bufio"
+	"bytes"
+	"encoding/gob"
 	"fmt"
 	"net"
 
@@ -79,6 +82,41 @@ func (d *Daemon) Listen() error {
 	return nil
 }
 
+func (d *Daemon) Connect(remote string) error {
+	conn, err := net.Dial("tcp", fmt.Sprintf("%s:5555", remote))
+	defer conn.Close()
+	if err != nil {
+		log.WithField("error", err.Error()).
+			WithField("remote", remote).
+			WithField("port", "5555").
+			Error("[peer] failed connecting to remote host")
+		return err
+	}
+
+	disc := NewDiscoveryMessage(d.c.Version)
+	var buffer bytes.Buffer
+	enc := gob.NewEncoder(&buffer)
+	enc.Encode(disc)
+	written, err := conn.Write(buffer.Bytes())
+	if err != nil {
+		log.WithField("written", written).
+			WithField("error", err.Error()).
+			WithField("remote", remote).
+			Error("[peer] failed to transmit DiscoveryMessage to remote host")
+		return err
+	}
+
+	if written <= 4 {
+		log.WithField("bytes written", written).
+			Warn("[peer] bytes of DiscoveryMessage written to remote host are low")
+	}
+
+	log.WithField("remote", remote).
+		WithField("port", 5555).
+		Info("[peer] sent a DiscoveryMessage to remote host")
+	return nil
+}
+
 func handle(incoming net.Listener) {
 	for {
 		conn, err := incoming.Accept()
@@ -88,5 +126,42 @@ func handle(incoming net.Listener) {
 		}
 		log.WithField("from", conn.RemoteAddr().String()).
 			Info("[peer] handling incoming connection")
+
+		// buffer := make([]byte, 128)
+		// read, err := conn.Read(buffer)
+		c := bufio.NewReader(conn)
+		// size, err := c.ReadByte()
+		// if err != nil {
+		// 	log.WithField("error", err.Error()).
+		// 		WithField("bytes read", size).
+		// 		WithField("remote", conn.RemoteAddr().String).
+		// 		Error("[peer] connection handler could not read payload")
+		// 	err = conn.Close()
+		// 	// TODO: figure out what scenarios lead to this + how to recover
+		// 	if err != nil {
+		// 		log.WithField("error", err.Error()).
+		// 			Fatal("[peer] could not lose connection!")
+		// 	}
+		// 	continue
+		// }
+
+		// _, err = io.ReadFull(c, buffer[:int(size)])
+		// if err != nil {
+		// 	log.WithField("size", size).
+		// 		Error("[peer] could not read full payload")
+		// 	continue
+		// }
+
+		var msg DiscoveryMessage
+		dec := gob.NewDecoder(c)
+		err = dec.Decode(&msg)
+		if err != nil {
+			log.WithField("error", err.Error()).
+				Error("[peer] could not decode payload")
+			continue
+		}
+		log.WithField("remote version", msg.Version).
+			WithField("remote", conn.RemoteAddr().String()).
+			Info("[peer] received DiscoveryMessage from remote peer")
 	}
 }
